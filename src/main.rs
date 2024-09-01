@@ -3,7 +3,7 @@ use state::{Elevator, Floor, State, StickFigure};
 
 mod state;
 
-fn controls(rl: &mut RaylibHandle, thread: &RaylibThread, state: &mut State) {
+fn controls(rl: &mut RaylibHandle, state: &mut State) {
     let mouse_pos = rl.get_mouse_position();
     let mouse_delta = rl.get_mouse_delta();
 
@@ -17,7 +17,6 @@ fn controls(rl: &mut RaylibHandle, thread: &RaylibThread, state: &mut State) {
     } else if rl.is_mouse_button_pressed(MouseButton::MOUSE_BUTTON_LEFT) {
         for floor in &state.floors {
             if floor.y as f32 >= mouse_pos.y {
-                println!("Floor: {:#?}", floor);
                 state.elevator.set_target(floor.y - 78);
                 break;
             }
@@ -25,7 +24,7 @@ fn controls(rl: &mut RaylibHandle, thread: &RaylibThread, state: &mut State) {
     }
 }
 
-fn calculate(_: &mut RaylibHandle, state: &mut State) {
+fn calculate(rl: &mut RaylibHandle, state: &mut State) {
     if let Some(y_target) = state.elevator.y_target {
         let y_target = y_target as f32;
         let target_direction_sign = -(state.elevator.y_old - y_target).signum();
@@ -86,8 +85,18 @@ fn calculate(_: &mut RaylibHandle, state: &mut State) {
             stick_figure.x = 75.0;
         }
 
-        if let Some(walking_state) = stick_figure.walking {
-            stick_figure.walking = Some((walking_state % 3) + 1);
+        if let Some(walking_state) = stick_figure.walking_state {
+            stick_figure.walking_state = Some((walking_state + 1) % 30);
+        }
+
+        stick_figure.x += stick_figure.walking_direction as f32;
+
+        if !stick_figure.in_elevator {
+            if stick_figure.x <= 105.0 || stick_figure.x >= 765.0 {
+                stick_figure.walking_direction *= -1;
+            } else if rl.get_random_value::<i32>(0..200) == 10 {
+                stick_figure.walking_direction *= -1;
+            }
         }
     }
 }
@@ -161,33 +170,47 @@ fn draw_stick_figure(d: &mut RaylibDrawHandle, stick_figure: &StickFigure) {
         Color::WHITE,
     );
 
-    // Arms
-    d.draw_line_ex(
-        Vector2::new(x_center, circle_bottom_y + 2.0),
-        Vector2::new(x_center - 7.0, circle_bottom_y + 12.0),
-        2.0,
-        Color::WHITE,
-    );
-    d.draw_line_ex(
-        Vector2::new(x_center, circle_bottom_y + 2.0),
-        Vector2::new(x_center + 7.0, circle_bottom_y + 12.0),
-        2.0,
-        Color::WHITE,
-    );
+    let mut arms = vec![
+        (Vector2::new(x_center, circle_bottom_y + 2.0), Vector2::new(x_center - 7.0, circle_bottom_y + 12.0)),
+        (Vector2::new(x_center, circle_bottom_y + 2.0), Vector2::new(x_center + 7.0, circle_bottom_y + 12.0)),
+    ];
 
-    // Legs
-    d.draw_line_ex(
-        Vector2::new(x_center, circle_bottom_y + 15.0),
-        Vector2::new(x_center - 7.0, circle_bottom_y + 24.0),
-        2.0,
-        Color::WHITE,
-    );
-    d.draw_line_ex(
-        Vector2::new(x_center, circle_bottom_y + 15.0),
-        Vector2::new(x_center + 7.0, circle_bottom_y + 24.0),
-        2.0,
-        Color::WHITE,
-    );
+    let mut legs = vec![
+        (Vector2::new(x_center, circle_bottom_y + 15.0), Vector2::new(x_center - 7.0, circle_bottom_y + 24.0)),
+        (Vector2::new(x_center, circle_bottom_y + 15.0), Vector2::new(x_center + 7.0, circle_bottom_y + 24.0)),
+    ];
+
+    if let Some(walking_state) = stick_figure.walking_state {
+        if walking_state < 7 {
+            arms[0].1.x += 4.0;
+            arms[0].1.y += 4.0;
+            arms[1].1.x -= 4.0;
+            arms[1].1.y += 4.0;
+
+            legs[0].1.x += 2.0;
+            legs[0].1.y += 2.0;
+            legs[1].1.x -= 2.0;
+            legs[1].1.y += 2.0;
+        } else if walking_state < 15 {
+            arms[0].1.x += 2.0;
+            arms[0].1.y += 2.0;
+            arms[1].1.x -= 2.0;
+            arms[1].1.y += 2.0;
+
+            legs[0].1.x += 4.0;
+            legs[0].1.y += 4.0;
+            legs[1].1.x -= 4.0;
+            legs[1].1.y += 4.0;
+        }
+    }
+
+    for (arm_start, arm_end) in arms {
+        d.draw_line_ex(arm_start, arm_end, 2.0, Color::WHITE);
+    }
+
+    for (leg_start, leg_end) in legs {
+        d.draw_line_ex(leg_start, leg_end, 2.0, Color::WHITE);
+    }
 }
 
 fn draw(rl: &mut RaylibHandle, thread: &RaylibThread, state: &State) {
@@ -211,10 +234,20 @@ fn main() {
 
     state.elevator.set_target(4 * 85 + 28);
 
-    let mut elevator_stickman = StickFigure::new(0.0, 0.0);
-    elevator_stickman.in_elevator = true;
-    elevator_stickman.walking = Some(0);
-    state.stick_figures.push(elevator_stickman);
+    state.stick_figures.push({
+        let mut sm = StickFigure::new(0.0, 0.0);
+        sm.in_elevator = true;
+        sm.walking_state = None;
+        sm
+    });
+
+    state.stick_figures.push({
+        let mut sm = StickFigure::new(150.0, state.floors[4].y as f32 - 35.0);
+        sm.in_elevator = false;
+        sm.walking_state = Some(0);
+        sm.walking_direction = 1;
+        sm
+    });
 
     let (mut rl, thread) = raylib::init()
         .title("Elevator Simulator")
@@ -225,7 +258,7 @@ fn main() {
     rl.set_target_fps(60);
 
     while !rl.window_should_close() {
-        controls(&mut rl, &thread, &mut state);
+        controls(&mut rl, &mut state);
         calculate(&mut rl, &mut state);
         draw(&mut rl, &thread, &state);
     }

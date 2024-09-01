@@ -22,7 +22,8 @@ impl Elevator {
 pub struct StickFigure {
     pub x: f32,
     pub y: f32,
-    pub walking: Option<i8>,
+    pub walking_state: Option<u8>,
+    pub walking_direction: i32,
     pub in_elevator: bool,
 }
 
@@ -31,7 +32,8 @@ impl StickFigure {
         Self {
             x,
             y,
-            walking: None,
+            walking_state: None,
+            walking_direction: 0,
             in_elevator: false,
         }
     }
